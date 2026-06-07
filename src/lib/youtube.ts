@@ -109,6 +109,26 @@ export interface DownloadJob {
 // In-memory job cache
 export const downloadJobs = new Map<string, DownloadJob>();
 
+async function downloadYtDlp(dest: string): Promise<void> {
+  let url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+  if (process.platform === 'win32') {
+    url += '.exe';
+  } else if (process.platform === 'darwin') {
+    url += '_macos';
+  }
+  
+  console.log(`Downloading yt-dlp from: ${url}`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download yt-dlp: ${response.status} ${response.statusText}`);
+  }
+  
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  await fs.promises.writeFile(dest, buffer);
+  console.log(`yt-dlp downloaded successfully to: ${dest}`);
+}
+
 /**
  * Ensures yt-dlp binary is downloaded and ready for use.
  */
@@ -119,12 +139,7 @@ export async function ensureYtDlp(): Promise<string> {
 
   if (!fs.existsSync(YT_DLP_PATH)) {
     console.log(`yt-dlp not found. Downloading to ${YT_DLP_PATH}...`);
-    let platform: 'win32' | 'linux' | 'darwin' = 'linux';
-    if (process.platform === 'win32') platform = 'win32';
-    else if (process.platform === 'darwin') platform = 'darwin';
-    
-    await YTDlpWrap.downloadFromGithub(YT_DLP_PATH, 'latest', platform);
-    console.log('yt-dlp downloaded successfully.');
+    await downloadYtDlp(YT_DLP_PATH);
   }
 
   if (process.platform !== 'win32') {
