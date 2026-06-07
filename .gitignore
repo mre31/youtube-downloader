@@ -1,0 +1,31 @@
+# Dependencies
+/node_modules
+/.pnpm-store
+
+# Next.js Build Output
+/.next/
+/out/
+
+# Production Build
+/build
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Local env files
+.env*.local
+.env
+
+# Verifying/testing scratch folders
+/scratch/
+
+# Local binaries and temporary download caches (YouTube Downloader specific)
+/bin/
+/temp/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
