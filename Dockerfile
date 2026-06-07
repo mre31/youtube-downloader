@@ -23,11 +23,11 @@ COPY . .
 RUN npm run build
 
 # Expose Next.js port
-EXPOSE 3000
+EXPOSE 5055
 
 # Set production environment variables
 ENV NODE_ENV=production
-ENV PORT=3000
+ENV PORT=5055
 
 # Start Next.js server
 CMD ["npm", "start"]
