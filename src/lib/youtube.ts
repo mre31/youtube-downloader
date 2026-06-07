@@ -189,7 +189,7 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
     const totalSize = rawSize ? (isVideoOnly ? rawSize + bestAudioSize : rawSize) : null;
     
     const format: VideoFormat = {
-      formatId: f.format_id,
+      formatId: isVideoOnly ? `${f.format_id}+bestaudio` : f.format_id,
       ext: isVideoOnly ? 'mp4' : f.ext, // force mp4 container for merged files
       resolution,
       qualityLabel: `${resolution} (${isVideoOnly ? 'Merged' : 'Direct'})`,
