@@ -1,11 +1,12 @@
 # Base image
 FROM node:20-slim
 
-# Install system dependencies (ffmpeg for merging/conversion, python3 for yt-dlp, curl for downloads)
+# Install system dependencies (ffmpeg for merging/conversion, python3 for yt-dlp, curl for downloads, ca-certificates)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     python3 \
     curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -129,35 +129,87 @@ async function downloadYtDlp(dest: string): Promise<void> {
   console.log(`yt-dlp downloaded successfully to: ${dest}`);
 }
 
+let lastCheckTime = 0;
+const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+
 /**
  * Ensures yt-dlp binary is downloaded and ready for use.
+ * Automatically keeps yt-dlp updated if it is older than 2 days or if forced.
  */
-export async function ensureYtDlp(): Promise<string> {
+export async function ensureYtDlp(forceUpdate = false): Promise<string> {
   if (!fs.existsSync(BIN_DIR)) {
     fs.mkdirSync(BIN_DIR, { recursive: true });
   }
 
-  if (!fs.existsSync(YT_DLP_PATH)) {
-    console.log(`yt-dlp not found. Downloading to ${YT_DLP_PATH}...`);
+  const exists = fs.existsSync(YT_DLP_PATH);
+  const now = Date.now();
+  let shouldDownload = !exists || forceUpdate;
+
+  if (exists && !shouldDownload && now - lastCheckTime > CHECK_INTERVAL) {
+    try {
+      const stats = fs.statSync(YT_DLP_PATH);
+      const ageDays = (now - stats.mtimeMs) / (1000 * 60 * 60 * 24);
+      if (ageDays > 2) {
+        console.log(`yt-dlp binary is ${ageDays.toFixed(1)} days old. Automatically refreshing...`);
+        shouldDownload = true;
+      }
+      lastCheckTime = now;
+    } catch (e) {
+      console.warn('Could not inspect yt-dlp binary stats:', e);
+    }
+  }
+
+  if (shouldDownload) {
+    console.log(`Downloading / updating yt-dlp to ${YT_DLP_PATH}...`);
     await downloadYtDlp(YT_DLP_PATH);
+    lastCheckTime = now;
   }
 
   if (process.platform !== 'win32') {
-    fs.chmodSync(YT_DLP_PATH, '755');
+    try {
+      fs.chmodSync(YT_DLP_PATH, '755');
+    } catch (e) {
+      console.warn('Failed to set permissions on yt-dlp:', e);
+    }
   }
 
   return YT_DLP_PATH;
 }
 
 /**
+ * Standard yt-dlp arguments for modern YouTube compatibility
+ */
+export function getStandardYtDlpArgs(url: string): string[] {
+  return [
+    url,
+    '--no-warnings',
+    '--no-update',
+    '--js-runtimes',
+    'node',
+    '--extractor-args',
+    'youtube:player_client=default,web,android',
+  ];
+}
+
+/**
  * Retrieves metadata for a video and parses available formats.
  */
-export async function getVideoInfo(url: string): Promise<VideoInfo> {
+export async function getVideoInfo(url: string, isRetry = false): Promise<VideoInfo> {
   const binaryPath = await ensureYtDlp();
   const ytDlpWrap = new YTDlpWrap(binaryPath);
   
-  // Fetch raw JSON metadata
-  const metadata = await ytDlpWrap.getVideoInfo(url);
+  let metadata: any;
+  try {
+    // Fetch raw JSON metadata with JS runtime and modern extractor parameters
+    metadata = await ytDlpWrap.getVideoInfo(getStandardYtDlpArgs(url));
+  } catch (error: any) {
+    if (!isRetry) {
+      console.log('getVideoInfo failed. Forcing yt-dlp update and retrying once...', error.message);
+      await ensureYtDlp(true);
+      return getVideoInfo(url, true);
+    }
+    throw error;
+  }
   
   const rawFormats = metadata.formats || [];
   
@@ -283,7 +335,7 @@ export async function startDownloadJob(
   downloadJobs.set(jobId, job);
 
   // Build command-line arguments
-  const args: string[] = [url];
+  const args: string[] = getStandardYtDlpArgs(url);
 
   // Configure output path template
   // We use the jobId to make the filename unique and easy to find
