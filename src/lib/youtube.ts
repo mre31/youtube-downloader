@@ -137,6 +137,13 @@ const CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
  * Automatically keeps yt-dlp updated if it is older than 2 days or if forced.
  */
 export async function ensureYtDlp(forceUpdate = false): Promise<string> {
+  // Container deployments use the version installed in the image. Update it
+  // by rebuilding the image rather than modifying a running container.
+  if (process.env.YT_DLP_PATH) {
+    fs.accessSync(process.env.YT_DLP_PATH, fs.constants.X_OK);
+    return process.env.YT_DLP_PATH;
+  }
+
   if (!fs.existsSync(BIN_DIR)) {
     fs.mkdirSync(BIN_DIR, { recursive: true });
   }
