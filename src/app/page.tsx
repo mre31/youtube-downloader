@@ -429,7 +429,7 @@ export default function Home() {
 
             {jobStatus.status === 'merging' && (
               <p className="text-[11px] text-zinc-400 bg-zinc-850 p-2.5 rounded border border-zinc-800/80 leading-normal text-left">
-                Merging video and audio streams using FFmpeg backend. This can take a moment for large/long videos.
+                This can take a moment for large/long videos.
               </p>
             )}
 
