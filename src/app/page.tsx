@@ -277,7 +277,7 @@ export default function Home() {
             )}
 
             {/* Formats Tabs */}
-            <p className="text-xs text-zinc-400">Original quality · No re-encoding</p>
+            <p className="text-xs text-zinc-400">Original quality</p>
             <Tabs defaultValue="video" className="w-full">
               <TabsList className="flex w-full bg-[#1d1d20] border border-zinc-800 p-1 rounded-lg">
                 <TabsTrigger 
