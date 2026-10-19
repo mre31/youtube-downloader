@@ -65,10 +65,10 @@ export async function GET(request: Request) {
     headers.set('Content-Length', stat.size.toString());
 
     return new Response(readable, { headers });
-  } catch (error: any) {
+  } catch (error) {
     console.error('API Download File Error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to stream file' },
+      { error: error instanceof Error ? error.message : 'Failed to stream file' },
       { status: 500 }
     );
   }

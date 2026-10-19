@@ -15,10 +15,10 @@ export async function POST(request: Request) {
     
     const info = await getVideoInfo(url);
     return NextResponse.json(info);
-  } catch (error: any) {
+  } catch (error) {
     console.error('API Info Error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch video details' },
+      { error: error instanceof Error ? error.message : 'Failed to fetch video details' },
       { status: 500 }
     );
   }

@@ -11,9 +11,6 @@ const roboto = Roboto({
 export const metadata: Metadata = {
   title: "YouTube Video Downloader",
   description: "Download YouTube videos and audio easily in high quality",
-  icons: {
-    icon: "/favicon.png",
-  },
 };
 
 export default function RootLayout({

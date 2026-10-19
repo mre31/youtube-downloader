@@ -24,10 +24,10 @@ export async function GET(request: Request) {
       error: job.error,
       filename: job.filename
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('API Download Status Error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch status' },
+      { error: error instanceof Error ? error.message : 'Failed to fetch status' },
       { status: 500 }
     );
   }

@@ -2,85 +2,21 @@ import path from 'path';
 import fs from 'fs';
 import YTDlpWrap from 'yt-dlp-wrap';
 import ffmpegPath from 'ffmpeg-static';
+import { buildVideoFormats, getFormatArgs, parseDownloadProgress, type SourceFormat, type VideoFormat } from './download-options';
+export type { VideoFormat } from './download-options';
 
 const BIN_DIR = path.join(process.cwd(), 'bin');
 const YT_DLP_PATH = path.join(BIN_DIR, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 const TEMP_DIR = path.join(process.cwd(), 'temp');
 
-// Resolve physical ffmpeg path to bypass Next.js server bundling rewriting
-let resolvedFfmpegPath: string | null = null;
-if (ffmpegPath) {
-  if (ffmpegPath.includes('ROOT') || !path.isAbsolute(ffmpegPath)) {
-    const physicalPath = path.join(
-      process.cwd(),
-      'node_modules',
-      'ffmpeg-static',
-      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
-    );
-    if (fs.existsSync(physicalPath)) {
-      resolvedFfmpegPath = physicalPath;
-    } else {
-      resolvedFfmpegPath = ffmpegPath;
-    }
-  } else {
-    resolvedFfmpegPath = ffmpegPath;
-  }
-}
-
-// Ensure temp directory exists and clean up leftover files on start
-try {
-  if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
-  } else {
-    const files = fs.readdirSync(TEMP_DIR);
-    for (const file of files) {
-      const filePath = path.join(TEMP_DIR, file);
-      fs.unlink(filePath, (err) => {
-        if (err && err.code !== 'ENOENT') console.error('Error cleaning file on start:', err);
-      });
-    }
-    console.log('Cleaned up temp directory on server startup.');
-  }
-} catch (err) {
-  console.error('Failed to clean temp directory on startup:', err);
-}
-
-// Periodic auto-cleanup for orphaned files older than 10 minutes
-if (typeof window === 'undefined') {
-  setInterval(() => {
-    try {
-      if (fs.existsSync(TEMP_DIR)) {
-        const files = fs.readdirSync(TEMP_DIR);
-        const now = Date.now();
-        const maxAge = 10 * 60 * 1000; // 10 minutes
-        
-        for (const file of files) {
-          const filePath = path.join(TEMP_DIR, file);
-          const stat = fs.statSync(filePath);
-          if (now - stat.mtimeMs > maxAge) {
-            fs.unlink(filePath, (err) => {
-              if (err && err.code !== 'ENOENT') console.error('Error auto-cleaning orphan file:', err);
-              else console.log('Auto-cleaned orphan temp file:', filePath);
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Failed to run periodic temp file cleanup:', err);
-    }
-  }, 5 * 60 * 1000); // Check every 5 minutes
-}
-
-export interface VideoFormat {
-  formatId: string;
-  ext: string;
-  resolution: string; // e.g., '1080p', '720p', 'Audio'
-  qualityLabel: string; // e.g., '1080p (MP4)', '128kbps (M4A)'
-  filesize: number | null; // bytes
-  vcodec: string;
-  acodec: string;
-  fps?: number;
-  tbr?: number;
+function getFfmpegPath(): string {
+  const configured = process.env.FFMPEG_BIN || ffmpegPath;
+  const physicalPath = path.join(process.cwd(), 'node_modules', 'ffmpeg-static',
+    process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  const resolved = configured && !configured.includes('ROOT') && path.isAbsolute(configured)
+    ? configured : physicalPath;
+  fs.accessSync(resolved, fs.constants.X_OK);
+  return resolved;
 }
 
 export interface VideoInfo {
@@ -106,8 +42,38 @@ export interface DownloadJob {
   error?: string;
 }
 
-// In-memory job cache
-export const downloadJobs = new Map<string, DownloadJob>();
+// Route bundles and development reloads must share the same jobs and cleanup timer.
+const globalState = globalThis as typeof globalThis & {
+  youtubeDownloads?: { jobs: Map<string, DownloadJob>; cleanupTimer: NodeJS.Timeout };
+};
+
+function cleanupOrphanedFiles(jobs: Map<string, DownloadJob>) {
+  try {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    for (const file of fs.readdirSync(TEMP_DIR)) {
+      const active = [...jobs.values()].some(job =>
+        (job.status === 'downloading' || job.status === 'merging') && file.startsWith(`${job.id}.`)
+      );
+      if (active) continue;
+      const filePath = path.join(TEMP_DIR, file);
+      const stat = fs.statSync(filePath);
+      if (stat.isFile() && Date.now() - stat.mtimeMs > 10 * 60 * 1000) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to clean orphaned downloads:', error);
+  }
+}
+
+if (!globalState.youtubeDownloads) {
+  const jobs = new Map<string, DownloadJob>();
+  cleanupOrphanedFiles(jobs);
+  const cleanupTimer = setInterval(() => cleanupOrphanedFiles(jobs), 5 * 60 * 1000);
+  cleanupTimer.unref();
+  globalState.youtubeDownloads = { jobs, cleanupTimer };
+}
+export const downloadJobs = globalState.youtubeDownloads.jobs;
 
 async function downloadYtDlp(dest: string): Promise<void> {
   let url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
@@ -189,12 +155,11 @@ export async function ensureYtDlp(forceUpdate = false): Promise<string> {
 export function getStandardYtDlpArgs(url: string): string[] {
   return [
     url,
-    '--no-warnings',
+    '--ignore-config',
+    '--no-playlist',
     '--no-update',
     '--js-runtimes',
     'node',
-    '--extractor-args',
-    'youtube:player_client=default,web,android',
   ];
 }
 
@@ -205,100 +170,31 @@ export async function getVideoInfo(url: string, isRetry = false): Promise<VideoI
   const binaryPath = await ensureYtDlp();
   const ytDlpWrap = new YTDlpWrap(binaryPath);
   
-  let metadata: any;
+  let metadata: {
+    id: string;
+    title: string;
+    thumbnail?: string;
+    duration?: number;
+    uploader?: string;
+    author?: string;
+    formats?: SourceFormat[];
+  };
   try {
     // Fetch raw JSON metadata with JS runtime and modern extractor parameters
-    metadata = await ytDlpWrap.getVideoInfo(getStandardYtDlpArgs(url));
-  } catch (error: any) {
+    // The wrapper forces '-f best', which fails when there is no combined stream.
+    metadata = JSON.parse(await ytDlpWrap.execPromise([
+      ...getStandardYtDlpArgs(url), '--dump-single-json', '--skip-download',
+    ]));
+  } catch (error) {
     if (!isRetry) {
-      console.log('getVideoInfo failed. Forcing yt-dlp update and retrying once...', error.message);
+      console.log('getVideoInfo failed. Forcing yt-dlp update and retrying once...', error instanceof Error ? error.message : String(error));
       await ensureYtDlp(true);
       return getVideoInfo(url, true);
     }
     throw error;
   }
   
-  const rawFormats = metadata.formats || [];
-  
-  // Find the best audio-only format for merging size calculations
-  const audioFormats = rawFormats.filter((f: any) => f.acodec !== 'none' && f.vcodec === 'none');
-  const bestAudio = audioFormats.reduce((best: any, current: any) => {
-    const bestTbr = best?.tbr || 0;
-    const currentTbr = current?.tbr || 0;
-    return currentTbr > bestTbr ? current : best;
-  }, audioFormats[0] || null);
-
-  const bestAudioSize = bestAudio ? (bestAudio.filesize || bestAudio.filesize_approx || 0) : 0;
-
-  // Process formats
-  const formats: VideoFormat[] = [];
-  const resolutionMap = new Map<string, VideoFormat>();
-
-  // 1. Group video formats by height (resolution)
-  const videoFormats = rawFormats.filter((f: any) => f.vcodec !== 'none');
-  
-  for (const f of videoFormats) {
-    if (!f.height) continue;
-    
-    const resolution = `${f.height}p`;
-    const isVideoOnly = f.acodec === 'none';
-    
-    // Estimate size: if video-only, add best audio size since we will merge them
-    const rawSize = f.filesize || f.filesize_approx || null;
-    const totalSize = rawSize ? (isVideoOnly ? rawSize + bestAudioSize : rawSize) : null;
-    
-    const format: VideoFormat = {
-      formatId: isVideoOnly ? `${f.format_id}+bestaudio` : f.format_id,
-      ext: isVideoOnly ? 'mp4' : f.ext, // force mp4 container for merged files
-      resolution,
-      qualityLabel: `${resolution} (${isVideoOnly ? 'Merged' : 'Direct'})`,
-      filesize: totalSize,
-      vcodec: f.vcodec,
-      acodec: f.acodec,
-      fps: f.fps,
-      tbr: f.tbr
-    };
-
-    // If we already have a format for this resolution, keep the one with higher bitrate (tbr)
-    const existing = resolutionMap.get(resolution);
-    if (!existing || (format.tbr || 0) > (existing.tbr || 0)) {
-      resolutionMap.set(resolution, format);
-    }
-  }
-
-  // Add video formats to the list
-  resolutionMap.forEach(f => formats.push(f));
-
-  // Sort video formats from highest resolution to lowest
-  formats.sort((a, b) => {
-    const resA = parseInt(a.resolution);
-    const resB = parseInt(b.resolution);
-    return resB - resA;
-  });
-
-  // 2. Add standard Audio Only formats
-  // We'll offer MP3 (converted via FFmpeg) and the native high-quality M4A
-  if (bestAudio) {
-    formats.push({
-      formatId: 'bestaudio_mp3',
-      ext: 'mp3',
-      resolution: 'Audio',
-      qualityLabel: 'MP3 (High Quality 320kbps)',
-      filesize: bestAudioSize ? Math.round(bestAudioSize * 1.5) : null, // MP3 conversion usually increases size slightly
-      vcodec: 'none',
-      acodec: 'mp3'
-    });
-
-    formats.push({
-      formatId: bestAudio.format_id,
-      ext: bestAudio.ext === 'webm' ? 'm4a' : bestAudio.ext, // Prefer m4a if possible
-      resolution: 'Audio',
-      qualityLabel: `M4A (Native Quality ${Math.round((bestAudio.tbr || 128))}kbps)`,
-      filesize: bestAudioSize || null,
-      vcodec: 'none',
-      acodec: bestAudio.acodec
-    });
-  }
+  const formats = buildVideoFormats(metadata.formats || []);
 
   return {
     id: metadata.id,
@@ -321,143 +217,91 @@ export async function startDownloadJob(
   formatId: string,
   ext: string
 ): Promise<void> {
-  const binaryPath = await ensureYtDlp();
-  
-  if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
-  }
-
   const job: DownloadJob = {
-    id: jobId,
-    url,
-    title,
-    status: 'downloading',
-    progress: 0,
-    speed: '0 KiB/s',
-    eta: '--:--',
-    outputPath: null,
-    filename: null
+    id: jobId, url, title, status: 'downloading', progress: 0,
+    speed: '0 KiB/s', eta: '--:--', outputPath: null, filename: null,
   };
-  
+  // Register before awaiting setup so the status endpoint can always find the job.
   downloadJobs.set(jobId, job);
 
-  // Build command-line arguments
-  const args: string[] = getStandardYtDlpArgs(url);
+  const fail = (error: unknown, diagnostics = '') => {
+    console.error(`Job ${jobId} failed:`, error, diagnostics);
+    job.status = 'failed';
+    const message = error instanceof Error ? error.message : String(error);
+    const detail = message.split('\n').filter(line => line.startsWith('ERROR:')).pop();
+    job.error = /Postprocessing|Conversion failed/i.test(message)
+      ? 'Video/audio processing failed. FFmpeg details are available in the server logs.'
+      : detail || message;
+  };
 
-  // Configure output path template
-  // We use the jobId to make the filename unique and easy to find
-  args.push('-o', path.join(TEMP_DIR, `${jobId}.%(ext)s`));
-
-  // Provide FFmpeg location for conversions or merging
-  if (resolvedFfmpegPath) {
-    args.push('--ffmpeg-location', resolvedFfmpegPath);
-  }
-
-  // Handle format flags
-  if (formatId === 'bestaudio_mp3') {
-    // Extract audio and convert to MP3
-    args.push('-f', 'bestaudio');
-    args.push('--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0');
-  } else if (formatId.includes('+') || formatId.match(/^\d+$/)) {
-    // User requested a specific format or merged stream
-    args.push('-f', formatId);
-  } else {
-    // If it's a resolution-based request, we let yt-dlp download the video format
-    // and best audio format, and merge them
-    // E.g., if formatId is 1080p, we select bestvideo[height<=1080]+bestaudio
-    if (formatId.endsWith('p')) {
-      const height = parseInt(formatId);
-      args.push('-f', `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`);
-      args.push('--merge-output-format', 'mp4'); // Force merge to mp4
-    } else {
-      // Fallback
-      args.push('-f', formatId);
-    }
-  }
-
-  const ytDlpWrap = new YTDlpWrap(binaryPath);
-  const ytDlpProcess = ytDlpWrap.exec(args);
-
-  ytDlpProcess
-    .on('progress', (progress) => {
-      const currentJob = downloadJobs.get(jobId);
-      if (currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed') {
-        currentJob.progress = progress.percent || currentJob.progress;
-        if (progress.currentSpeed) {
-          currentJob.speed = progress.currentSpeed;
-        }
-        if (progress.eta) {
-          currentJob.eta = progress.eta;
-        }
-        if (progress.percent === 100) {
-          currentJob.status = 'merging';
-        }
-        downloadJobs.set(jobId, currentJob);
-      }
-    })
-    .on('ytDlpEvent', (event, data) => {
-      // Detect ffmpeg merging from logs
-      if (data.includes('[Merger]') || data.includes('[ExtractAudio]')) {
-        const currentJob = downloadJobs.get(jobId);
-        if (currentJob && currentJob.status === 'downloading') {
-          currentJob.status = 'merging';
-          downloadJobs.set(jobId, currentJob);
-        }
-      }
-
-      // Robust progress parsing fallback for speed/eta
-      if (event === 'download') {
-        const robustRegex = /^\s*([0-9.]+)%\s+of\s+([~0-9.a-zA-Z]+)\s+at\s+([0-9.a-zA-Z/]+|Unknown\s+speed)\s+ETA\s+([0-9:]+)/;
-        const match = data.match(robustRegex);
-        if (match) {
-          const currentJob = downloadJobs.get(jobId);
-          if (currentJob && currentJob.status !== 'completed' && currentJob.status !== 'failed') {
-            currentJob.progress = parseFloat(match[1]) || currentJob.progress;
-            currentJob.speed = match[3] || currentJob.speed;
-            currentJob.eta = match[4] || currentJob.eta;
-            downloadJobs.set(jobId, currentJob);
-          }
-        }
-      }
-    })
-    .on('error', (error) => {
-      console.error(`Job ${jobId} failed:`, error);
-      const currentJob = downloadJobs.get(jobId);
-      if (currentJob) {
-        currentJob.status = 'failed';
-        currentJob.error = error.message || 'Download error occurred';
-        downloadJobs.set(jobId, currentJob);
-      }
-    })
-    .on('close', () => {
-      const currentJob = downloadJobs.get(jobId);
-      if (currentJob && currentJob.status !== 'failed') {
-        // Find the completed file in the temp directory
-        try {
-          const files = fs.readdirSync(TEMP_DIR);
-          const matchedFile = files.find(f => f.startsWith(jobId));
-          
-          if (matchedFile) {
-            currentJob.status = 'completed';
-            currentJob.progress = 100;
-            currentJob.outputPath = path.join(TEMP_DIR, matchedFile);
-            
-            // Clean up title for headers (ascii safe)
-            const safeTitle = title.replace(/[^\x20-\x7E]/g, '');
-            const cleanTitle = safeTitle.replace(/[\/\\:\*\?"<>\|]/g, '_');
-            const fileExt = path.extname(matchedFile);
-            currentJob.filename = `${cleanTitle || 'video'}${fileExt}`;
-            
-            downloadJobs.set(jobId, currentJob);
-            console.log(`Job ${jobId} finished. File: ${matchedFile}`);
-          } else {
-            throw new Error('Completed file not found in temp directory.');
-          }
-        } catch (err: any) {
-          currentJob.status = 'failed';
-          currentJob.error = err.message || 'Output file processing failed';
-          downloadJobs.set(jobId, currentJob);
-        }
-      }
+  try {
+    const binaryPath = await ensureYtDlp();
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    const finalPathFile = path.join(TEMP_DIR, `${jobId}.filepath`);
+    const args = [
+      ...getStandardYtDlpArgs(url),
+      '-o', path.join(TEMP_DIR, `${jobId}.%(ext)s`),
+      '--ffmpeg-location', getFfmpegPath(),
+      '--concurrent-fragments', '4',
+      '--abort-on-unavailable-fragments',
+      '--newline', '--progress', '--no-colors', '--verbose',
+      '--print-to-file', 'after_move:%(filepath)s', finalPathFile,
+      ...getFormatArgs(formatId, ext),
+    ];
+    const ytDlpProcess = new YTDlpWrap(binaryPath).exec(args);
+    let diagnostics = '';
+    // Verbose mode preserves the FFmpeg command and stderr on stream-copy errors.
+    ytDlpProcess.ytDlpProcess?.stderr?.on('data', (chunk: Buffer) => {
+      diagnostics = (diagnostics + chunk.toString()).slice(-32000);
     });
+    ytDlpProcess
+      .on('progress', (progress) => {
+        if (job.status === 'failed' || job.status === 'completed') return;
+        job.status = 'downloading';
+        job.progress = progress.percent ?? job.progress;
+        job.speed = progress.currentSpeed || job.speed;
+        job.eta = progress.eta || job.eta;
+      })
+      .on('ytDlpEvent', (event, data: string) => {
+        if (event === 'download') {
+          const progress = parseDownloadProgress(data);
+          if (progress) {
+            job.progress = progress.percent;
+            job.speed = progress.speed;
+            job.eta = progress.eta;
+          }
+        }
+        // yt-dlp-wrap strips the [Event] prefix from the event data.
+        if (['Merger', 'FixupM4a', 'FixupM3u8', 'VideoRemuxer'].includes(event)) {
+          job.status = 'merging';
+          job.speed = '';
+          job.eta = '--:--';
+        }
+      })
+      .on('error', (error) => fail(error, diagnostics))
+      .on('close', () => {
+        if (job.status === 'failed') return;
+        try {
+          // Read yt-dlp's final path after all postprocessors, never a .part/source file.
+          const outputPath = fs.readFileSync(finalPathFile, 'utf8').trim();
+          const outputName = path.basename(outputPath);
+          if (path.dirname(outputPath) !== TEMP_DIR || !outputName.startsWith(`${jobId}.`) ||
+            !['.mp4', '.webm', '.mkv', '.m4a', '.mp3', '.opus', '.ogg', '.aac', '.flac', '.wav'].includes(path.extname(outputPath)) ||
+            fs.statSync(outputPath).size === 0) {
+            throw new Error('Completed media file not found.');
+          }
+          fs.unlinkSync(finalPathFile);
+          const safeTitle = title.replace(/[^\x20-\x7E]/g, '').replace(/[\/\\:*?"<>|]/g, '_');
+          job.status = 'completed';
+          job.progress = 100;
+          job.outputPath = outputPath;
+          job.filename = `${safeTitle || 'video'}${path.extname(outputPath)}`;
+          console.log(`Job ${jobId} finished. File: ${outputName}`);
+        } catch (error) {
+          fail(error, diagnostics);
+        }
+      });
+  } catch (error) {
+    fail(error);
+  }
 }

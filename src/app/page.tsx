@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
+import { codecLabel, type VideoFormat } from '@/lib/download-options';
 import { 
   ArrowLeft, 
   RefreshCw, 
@@ -13,16 +13,6 @@ import {
   CheckCircle2,
   AlertCircle
 } from 'lucide-react';
-
-interface VideoFormat {
-  formatId: string;
-  ext: string;
-  resolution: string;
-  qualityLabel: string;
-  filesize: number | null;
-  vcodec: string;
-  acodec: string;
-}
 
 interface VideoInfo {
   id: string;
@@ -53,7 +43,6 @@ export default function Home() {
   
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<VideoFormat | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<DownloadJob | null>(null);
   
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -116,8 +105,8 @@ export default function Home() {
 
       setVideoInfo(data);
       setStep('select');
-    } catch (err: any) {
-      setError(err.message || 'An error occurred while fetching video details.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while fetching video details.');
     } finally {
       setLoading(false);
     }
@@ -148,7 +137,6 @@ export default function Home() {
         throw new Error(data.error || 'Failed to start download');
       }
 
-      setJobId(data.jobId);
       setJobStatus({
         id: data.jobId,
         status: 'downloading',
@@ -158,8 +146,8 @@ export default function Home() {
       });
 
       startPolling(data.jobId);
-    } catch (err: any) {
-      setError(err.message || 'Failed to start download job.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start download job.');
       setStep('select');
     } finally {
       setLoading(false);
@@ -187,7 +175,7 @@ export default function Home() {
           setError(data.error || 'Download processing failed on backend.');
           setStep('select');
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error('Polling error:', err);
       }
     }, 1000);
@@ -199,7 +187,6 @@ export default function Home() {
     setUrl('');
     setVideoInfo(null);
     setSelectedFormat(null);
-    setJobId(null);
     setJobStatus(null);
     setError(null);
   };
@@ -207,7 +194,6 @@ export default function Home() {
   const handleBackToSelect = () => {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     setStep('select');
-    setJobId(null);
     setJobStatus(null);
     setError(null);
   };
@@ -291,6 +277,7 @@ export default function Home() {
             )}
 
             {/* Formats Tabs */}
+            <p className="text-xs text-zinc-400">Original quality · No re-encoding</p>
             <Tabs defaultValue="video" className="w-full">
               <TabsList className="flex w-full bg-[#1d1d20] border border-zinc-800 p-1 rounded-lg">
                 <TabsTrigger 
@@ -315,12 +302,16 @@ export default function Home() {
                     key={format.formatId} 
                     className="flex items-center justify-between p-3 bg-[#1d1d20]/50 border border-zinc-800 rounded-lg hover:border-zinc-700 transition-colors"
                   >
-                    <div className="flex flex-col">
+                    <div className="flex flex-col min-w-0 pr-3">
                       <span className="text-xs font-semibold text-white flex items-center gap-1.5">
                         {format.resolution}
                         <span className="text-[9px] font-normal px-1 py-0.2 bg-zinc-800 text-zinc-400 rounded">
                           {format.ext.toUpperCase()}
                         </span>
+                      </span>
+                      <span className="text-[10px] text-zinc-400 mt-0.5">
+                        {codecLabel(format.vcodec)} + {codecLabel(format.acodec)}
+                        {format.fps ? ` · ${format.fps} fps` : ''}
                       </span>
                       <span className="text-[10px] text-zinc-500 mt-0.5">
                         Est. Size: {formatBytes(format.filesize)}
@@ -328,15 +319,16 @@ export default function Home() {
                     </div>
                     <button 
                       onClick={() => handleStartDownload(format)}
-                      className="bg-[#3b82f6] hover:bg-[#2563eb] text-white text-xs font-medium px-4 py-1.5 rounded-md transition-colors"
+                      aria-label={`Download ${format.resolution} ${format.ext.toUpperCase()} ${codecLabel(format.vcodec)}`}
+                      className="bg-[#3b82f6] hover:bg-[#2563eb] text-white text-xs font-medium px-4 py-1.5 rounded-md transition-colors shrink-0"
                     >
-                      Download
+                      {format.ext.toUpperCase()} ↓
                     </button>
                   </div>
                 ))}
               </TabsContent>
 
-              <TabsContent value="audio" className="mt-3 flex flex-col gap-2">
+              <TabsContent value="audio" className="mt-3 flex flex-col gap-2 max-h-[240px] overflow-y-auto pr-1">
                 {videoInfo.formats.filter(f => f.resolution === 'Audio').map((format) => (
                   <div 
                     key={format.formatId} 
@@ -352,9 +344,10 @@ export default function Home() {
                     </div>
                     <button 
                       onClick={() => handleStartDownload(format)}
-                      className="bg-[#3b82f6] hover:bg-[#2563eb] text-white text-xs font-medium px-4 py-1.5 rounded-md transition-colors"
+                      aria-label={`Download ${format.ext.toUpperCase()} ${codecLabel(format.acodec)}`}
+                      className="bg-[#3b82f6] hover:bg-[#2563eb] text-white text-xs font-medium px-4 py-1.5 rounded-md transition-colors shrink-0"
                     >
-                      Download
+                      {format.ext.toUpperCase()} ↓
                     </button>
                   </div>
                 ))}
@@ -378,7 +371,7 @@ export default function Home() {
               {jobStatus.status === 'merging' ? (
                 <>
                   <RefreshCw className="h-4 w-4 animate-spin text-zinc-400" />
-                  Merging video and audio streams...
+                  Preparing original streams...
                 </>
               ) : (
                 <>
@@ -387,6 +380,11 @@ export default function Home() {
                 </>
               )}
             </h3>
+            <p className="text-xs text-zinc-400">
+              {selectedFormat.ext.toUpperCase()} · {selectedFormat.resolution === 'Audio'
+                ? codecLabel(selectedFormat.acodec)
+                : `${selectedFormat.resolution} · ${codecLabel(selectedFormat.vcodec)} + ${codecLabel(selectedFormat.acodec)}`}
+            </p>
             {/* Video Details Row */}
             {videoInfo && (
               <div className="flex gap-4 items-center border-b border-zinc-800 pb-4 text-left">
@@ -429,7 +427,7 @@ export default function Home() {
 
             {jobStatus.status === 'merging' && (
               <p className="text-[11px] text-zinc-400 bg-zinc-850 p-2.5 rounded border border-zinc-800/80 leading-normal text-left">
-                Merging video and audio streams using FFmpeg backend. This can take a moment for large/long videos.
+                Packaging original streams without re-encoding. Original quality is preserved.
               </p>
             )}
 

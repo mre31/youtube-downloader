@@ -58,8 +58,9 @@ docker compose down
 - `/api/health` uç noktası Docker sağlık kontrolü için kullanılır. Container çökerse
   `unless-stopped` yeniden başlatma politikası devreye girer. `unhealthy` durumu tek
   başına Docker tarafından yeniden başlatma tetiklemez.
-- Geçici indirmeler `downloads` isimli Docker volume'ünde tutulur. Uygulama başlangıçta
-  eski dosyaları temizler; bu volume bir indirme arşivi değildir.
+- Geçici indirmeler `downloads` isimli Docker volume'ünde tutulur. Başlangıçta ve düzenli
+  aralıklarla 10 dakikadan eski dosyalar temizlenir; devam eden indirmeler korunur.
+  Bu volume bir indirme arşivi değildir.
 - İndirme işlerinin durumu bellekte tutulur. **Tek replica** çalıştırın; yeniden başlatmada
   devam eden işler kaybolur ve kullanıcıların indirmeyi tekrar başlatması gerekir.
 - yt-dlp imaj derlenirken kurulur. Güncellemek için repo klasöründe aşağıdaki komutu
@@ -89,3 +90,21 @@ Adres: `http://localhost:5055`. Docker dışında yt-dlp ilk kullanımda `bin/` 
 indirilir ve uygulama tarafından güncellenir. `YT_DLP_PATH` tanımlanırsa belirtilen
 çalıştırılabilir dosya kullanılır, otomatik güncelleme yapılmaz. `FFMPEG_BIN` ile sistem
 FFmpeg yolu belirtilebilir; Docker imajında `/usr/bin/ffmpeg` kullanılır.
+
+Arayüz, kaynağın sunduğu özgün dosya türlerini listeler: videoda çözünürlük,
+MP4/WebM/MKV kapsayıcısı, video/ses codec'leri ve kare hızı; seste M4A/AAC,
+WebM/Opus gibi seçenekler ve kaynak bit hızı gösterilir.
+
+**Hiçbir indirme yeniden kodlanmaz.** Ses doğrudan kaynak biçiminde indirilir.
+Ayrı video ve ses akışları yalnızca `-c copy` ile birleştirilir; uyumlu kapsayıcı
+yoksa MKV kullanılır. MP3 ancak kaynakta özgün MP3 akışı varsa sunulur; MP3'e
+çevirme ve otomatik dönüştürme istekleri API tarafından reddedilir.
+İşleme hatalarında FFmpeg komutu ve ayrıntılı hata çıktısı sunucu loglarına yazılır.
+
+Kontroller:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
