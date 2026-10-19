@@ -427,7 +427,7 @@ export default function Home() {
 
             {jobStatus.status === 'merging' && (
               <p className="text-[11px] text-zinc-400 bg-zinc-850 p-2.5 rounded border border-zinc-800/80 leading-normal text-left">
-                Packaging original streams without re-encoding. Original quality is preserved.
+                This can take a moment for large/long videos.
               </p>
             )}
 
