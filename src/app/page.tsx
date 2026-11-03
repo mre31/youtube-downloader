@@ -35,34 +35,6 @@ interface DownloadJob {
 }
 
 export default function Home() {
-  const [authenticated, setAuthenticated] = useState(false);
-  const [authChecking, setAuthChecking] = useState(true);
-  const [token, setToken] = useState('');
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authLoading, setAuthLoading] = useState(false);
-
-  useEffect(() => {
-    fetch('/api/auth').then(async response => {
-      setAuthenticated(response.ok);
-      if (response.status === 503) setAuthError('Sunucuda API_TOKEN tanımlanmalı.');
-    }).catch(() => setAuthError('Sunucuya erişilemedi.')).finally(() => setAuthChecking(false));
-  }, []);
-
-  const handleLogin = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setAuthLoading(true);
-    setAuthError(null);
-    try {
-      const response = await fetch('/api/auth', { method: 'POST', headers: { Authorization: `Bearer ${token.trim()}` } });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message || 'Giriş başarısız.');
-      setToken('');
-      setAuthenticated(true);
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Giriş başarısız.');
-    } finally { setAuthLoading(false); }
-  };
-
   const [step, setStep] = useState<'input' | 'select' | 'download' | 'ready'>('input');
   
   const [url, setUrl] = useState('');
@@ -226,38 +198,10 @@ export default function Home() {
     setError(null);
   };
 
-  if (!authenticated) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-[#1e1e21] text-zinc-100 p-6">
-        <form onSubmit={handleLogin} className="w-full max-w-sm flex flex-col gap-4">
-          <h1 className="text-2xl font-semibold">YouTube Video Downloader</h1>
-          <label htmlFor="api-token">Erişim token’ı</label>
-          <input id="api-token" type="password" autoComplete="current-password" required
-            value={token} onChange={event => setToken(event.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-800 p-3" />
-          <button disabled={authChecking || authLoading || !token.trim()} type="submit"
-            className="rounded-lg bg-blue-600 p-3 disabled:opacity-50">
-            {authChecking ? 'Kontrol ediliyor…' : authLoading ? 'Giriş yapılıyor…' : 'Giriş yap'}
-          </button>
-          {authError && <p role="alert" className="text-red-400">{authError}</p>}
-        </form>
-      </main>
-    );
-  }
-
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#1e1e21] text-zinc-100 font-sans p-6">
       <div className="w-full max-w-xl flex flex-col gap-6 items-center">
         
-        <button type="button" className="self-end text-sm text-zinc-400 hover:text-white" onClick={async () => {
-          try {
-            const response = await fetch('/api/auth', { method: 'DELETE' });
-            if (!response.ok) throw new Error('Çıkış yapılamadı.');
-            handleReset();
-            setAuthenticated(false);
-          } catch { setError('Çıkış yapılamadı. Tekrar deneyin.'); }
-        }}>Çıkış yap</button>
-
         {/* Title */}
         <h1 className="text-3xl md:text-4xl font-semibold tracking-normal text-white text-center">
           YouTube Video Downloader

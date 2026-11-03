@@ -6,8 +6,8 @@ FFmpeg ve EJS bileşenleriyle birlikte yt-dlp içerir; root olmayan kullanıcıy
 ## Dışarıdan video indirme API'si
 
 Sunucuda `.env` içindeki `API_TOKEN` alanına uzun rastgele bir token yazın
-(üretmek için: `openssl rand -hex 32`). Token zorunludur; hız sınırı uygulanmaz.
-Arayüz de aynı token ile giriş ister. İstek gönderdiğiniz terminalde aynı token'ı
+(üretmek için: `openssl rand -hex 32`). Token yalnızca `/api/v1` için zorunludur; hız sınırı uygulanmaz.
+Arayüz giriş ve token istemeden kullanılabilir. İstek gönderdiğiniz terminalde aynı token'ı
 `API_TOKEN` ortam değişkenine tanımlayın ve video bağlantısını gönderin:
 
 ```bash
@@ -32,7 +32,7 @@ Bu yapılandırma **Docker Standalone** ortamı içindir.
 2. Portainer'da Docker ortamını açıp **Stacks → Add stack → Repository / Git repository** seçin.
 3. Repo adresini (`https://github.com/mre31/youtube-downloader`) ve değişikliklerin bulunduğu branch'i girin.
 4. **Compose path** alanına `compose.yml` yazın.
-5. **Environment variables** altında `API_TOKEN` tanımlayın (zorunlu). İsteğe bağlı `APP_PORT` varsayılanı: `5055`.
+5. **Environment variables** altında `API_TOKEN` tanımlayın (yalnızca dış API için zorunlu). İsteğe bağlı `APP_PORT` varsayılanı: `5055`.
 6. **Deploy the stack** ile imajı derleyip uygulamayı başlatın.
 
 Uygulamaya `http://SUNUCU_IP:5055` üzerinden ulaşabilirsiniz. `APP_PORT` değiştirildiğinde

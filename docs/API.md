@@ -28,15 +28,12 @@ Token URL/query parametresinde veya JSON gövdesinde kabul edilmez. Eksik veya
 hatalı token `401`, sunucuda tanımlanmamış token `503` döndürür. Kimlik doğrulama,
 metadata sorgusu ve indirme başlamadan önce yapılır. **Hız sınırı uygulanmaz.**
 HTTPS üzerinden kullanın. Token'ı değiştirmek için sunucudaki `API_TOKEN` değerini
-güncelleyip uygulamayı yeniden başlatın; eski token ve tarayıcı oturumları geçersizleşir.
+güncelleyip uygulamayı yeniden başlatın; eski token geçersizleşir.
 
-Arayüz ilk açılışta token ister. Girişte `/api/auth` ucuna Bearer token gönderilir;
-8 saat geçerli, imzalı, `HttpOnly`, `SameSite=Strict` oturum çerezi oluşturulur.
-HTTPS isteklerinde çerez `Secure` olarak işaretlenir. HTTPS reverse proxy kullanırken
-`X-Forwarded-Proto: https` başlığının doğru iletildiğinden emin olun. Token tarayıcıda
-localStorage/sessionStorage'a yazılmaz; girişten sonra formdaki değer temizlenir.
-Arayüzde “Çıkış yap” çerezi siler. Oturum çerezi yalnızca eski arayüz API'lerinde
-kullanılır; `/api/v1` her zaman Bearer başlığı ister. `/api/health` token istemez.
+Arayüz token veya giriş istemez. Arayüzün kullandığı `/api/info` ve
+`/api/download/*` uçları herkese açıktır ve `API_TOKEN` tanımlanmasa da çalışır.
+Token koruması yalnızca dış entegrasyonlar için sunulan `/api/v1/*` yollarına
+uygulanır; uygulamanın tamamına erişim kısıtlaması sağlamaz. `/api/health` de açıktır.
 
 ## Hızlı başlangıç
 
@@ -210,9 +207,10 @@ v1 hata yanıtları aynı yapıyı kullanır:
 ## Yayınlama ve çalışma sınırları
 
 - API, uygulamayla aynı porttan erişilir. Docker/Portainer kurulum adımları README'dedir.
-- Hem eski hem yeni API uçları token/oturum doğrulamasıyla korunur. Paylaşılan tek
-  `API_TOKEN` kullanılır; kullanıcı başına ayrı yetki veya iş sahipliği yoktur. Aynı
-  token'a sahip istemciler iş kimliği üzerinden dosyalara erişebilir. Hız sınırı yoktur.
+- `/api/v1` uçlarında paylaşılan tek `API_TOKEN` kullanılır; kullanıcı başına ayrı
+  yetki veya iş sahipliği yoktur. Arayüz ve `/api/info`, `/api/download/*` uçları
+  herkese açıktır. İşler ortak depoda tutulduğundan iş kimliğini bilen istemci eski
+  uçlardan da durum/dosyaya erişebilir. Hız sınırı yoktur.
 - Sunucudan sunucuya HTTP çağrıları doğrudan kullanılabilir. Farklı origin'deki tarayıcı
   uygulamaları için CORS başlıkları eklenmez; kendi backend'iniz veya aynı origin proxy'si
   üzerinden çağırın ve API token’ını backend ortam değişkeninde saklayın.
@@ -226,5 +224,5 @@ v1 hata yanıtları aynı yapıyı kullanır:
 - YouTube bot doğrulaması, erişim kısıtlamaları ve formatların değişmesi indirmeyi
   engelleyebilir. Proxy zaman aşımını ilk metadata sorgusu ve büyük dosya aktarımına
   göre ayarlayın; dosya yanıtlarında buffering'i kapatın.
-- Arayüzün `/api/info` ve `/api/download/*` uçları korunur. Yeni entegrasyonlarda
+- Arayüzün `/api/info` ve `/api/download/*` uçları tokensız çalışır. Yeni entegrasyonlarda
   sürümlü `/api/v1` uçlarını kullanın; eski uçların yanıt biçimi farklıdır.

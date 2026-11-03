@@ -62,31 +62,20 @@ if (args.includes('--dump-single-json')) {
     for (const [endpoint, method] of [
       ['/api/v1/downloads', 'POST'], ['/api/v1/videos/info', 'POST'],
       ['/api/v1/downloads/missing', 'GET'], ['/api/v1/downloads/missing/file', 'GET'],
-      ['/api/info', 'POST'], ['/api/download/start', 'POST'],
-      ['/api/download/status?id=missing', 'GET'], ['/api/download/file?id=missing', 'GET'],
     ]) {
       const denied = await fetch(`${base}${endpoint}`, { method });
       assert.equal(denied.status, 401, endpoint);
       assert.equal((await fetch(`${base}${endpoint}`, { method, headers: { Authorization: 'Bearer wrong' } })).status, 401);
     }
     assert.equal((await fetch(`${base}/api/health`)).status, 200);
-    assert.equal((await fetch(`${base}/api/auth`)).status, 401);
-    assert.equal((await fetch(`${base}/api/auth`, { method: 'POST' })).status, 401);
     assert.equal((await fetch(`${base}/api/v1/downloads?token=${token}`, { method: 'POST' })).status, 401);
-    const login = await authenticatedFetch(`${base}/api/auth`, { method: 'POST' });
-    assert.equal(login.status, 200);
-    const sessionCookie = login.headers.get('set-cookie');
-    assert.match(sessionCookie, /HttpOnly/i);
-    assert.match(sessionCookie, /SameSite=strict/i);
-    assert.ok(!sessionCookie.includes(token));
-    const cookie = sessionCookie.split(';')[0];
-    assert.equal((await fetch(`${base}/api/auth`, { headers: { Cookie: cookie } })).status, 200);
-    assert.equal((await fetch(`${base}/api/download/status?id=missing`, { headers: { Cookie: cookie } })).status, 404);
-    assert.equal((await fetch(`${base}/api/v1/downloads/missing`, { headers: { Cookie: cookie } })).status, 401);
-    assert.equal((await fetch(`${base}/api/auth`, { method: 'POST', headers: { Cookie: cookie } })).status, 401);
-    const logout = await fetch(`${base}/api/auth`, { method: 'DELETE' });
-    assert.equal(logout.status, 200);
-    assert.match(logout.headers.get('set-cookie'), /Max-Age=0/i);
+    assert.equal((await fetch(`${base}/api/v1/downloads/missing`, { headers: { Cookie: `downloader_session=${token}` } })).status, 401);
+    assert.equal((await fetch(`${base}/api/download/status?id=missing`)).status, 404);
+    const home = await fetch(base);
+    assert.equal(home.status, 200);
+    assert.ok(!(await home.text()).includes('api-token'));
+    const browserInfo = await fetch(`${base}/api/info`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://youtu.be/jNQXAC9IVRw' }) });
+    assert.equal(browserInfo.status, 200);
 
     assert.equal((await post('/api/v1/downloads', { url: 'http://localhost/youtube.com' })).status, 400);
     assert.equal((await post('/api/v1/downloads', { url: 'https://youtu.be/jNQXAC9IVRw', maxHeight: 100 })).status, 422);
@@ -119,14 +108,30 @@ if (args.includes('--dump-single-json')) {
       assert.match(file.headers.get('content-disposition'), /attachment/);
       assert.equal(await file.text(), 'fixture-media');
       // Both API versions share jobs and files; receiving a file does not delete it.
-      const legacy = await authenticatedFetch(`${base}/api/download/file?id=${job.id}`);
+      const legacy = await fetch(`${base}/api/download/file?id=${job.id}`);
       assert.equal(await legacy.text(), 'fixture-media');
-      const legacyStatus = await authenticatedFetch(`${base}/api/download/status?id=${job.id}`);
+      const legacyStatus = await fetch(`${base}/api/download/status?id=${job.id}`);
       assert.equal((await legacyStatus.json()).status, 'completed');
       await rm(path.join(process.cwd(), 'temp', `${job.id}.${job.format.ext}`));
       assert.equal((await authenticatedFetch(`${base}${job.fileUrl}`)).status, 410);
       assert.equal((await authenticatedFetch(`${base}${job.statusUrl}`)).status, 410);
     }
+    // The public UI starts, polls and retrieves downloads without token or cookie.
+    const browserStart = await fetch(`${base}/api/download/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://youtu.be/jNQXAC9IVRw', title: 'UI test', formatId: '18', ext: 'mp4' }),
+    });
+    assert.equal(browserStart.status, 200);
+    const { jobId } = await browserStart.json();
+    jobs.push({ id: jobId, format: { ext: 'mp4' } });
+    let browserStatus;
+    for (let i = 0; i < 50; i++) {
+      browserStatus = await (await fetch(`${base}/api/download/status?id=${jobId}`)).json();
+      if (browserStatus.status === 'completed' || browserStatus.status === 'failed') break;
+      await delay(100);
+    }
+    assert.equal(browserStatus.status, 'completed');
+    assert.equal(await (await fetch(`${base}/api/download/file?id=${jobId}`)).text(), 'fixture-media');
   } finally {
     const exited = once(server, 'exit');
     server.kill('SIGTERM');
