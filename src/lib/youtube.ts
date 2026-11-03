@@ -40,6 +40,7 @@ export interface DownloadJob {
   outputPath: string | null;
   filename: string | null;
   error?: string;
+  finishedAt?: number;
 }
 
 // Route bundles and development reloads must share the same jobs and cleanup timer.
@@ -49,6 +50,9 @@ const globalState = globalThis as typeof globalThis & {
 
 function cleanupOrphanedFiles(jobs: Map<string, DownloadJob>) {
   try {
+    for (const [id, job] of jobs) {
+      if (job.finishedAt && Date.now() - job.finishedAt > 10 * 60 * 1000) jobs.delete(id);
+    }
     fs.mkdirSync(TEMP_DIR, { recursive: true });
     for (const file of fs.readdirSync(TEMP_DIR)) {
       const active = [...jobs.values()].some(job =>
@@ -227,6 +231,7 @@ export async function startDownloadJob(
   const fail = (error: unknown, diagnostics = '') => {
     console.error(`Job ${jobId} failed:`, error, diagnostics);
     job.status = 'failed';
+    job.finishedAt = Date.now();
     const message = error instanceof Error ? error.message : String(error);
     const detail = message.split('\n').filter(line => line.startsWith('ERROR:')).pop();
     job.error = /Postprocessing|Conversion failed/i.test(message)
@@ -293,6 +298,9 @@ export async function startDownloadJob(
           fs.unlinkSync(finalPathFile);
           const safeTitle = title.replace(/[^\x20-\x7E]/g, '').replace(/[\/\\:*?"<>|]/g, '_');
           job.status = 'completed';
+          job.finishedAt = Date.now();
+          // Retention starts on completion, even for long-running downloads.
+          fs.utimesSync(outputPath, new Date(), new Date());
           job.progress = 100;
           job.outputPath = outputPath;
           job.filename = `${safeTitle || 'video'}${path.extname(outputPath)}`;

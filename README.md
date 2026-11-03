@@ -3,6 +3,25 @@
 Next.js tabanlı video ve ses indirme uygulaması. Docker imajı Node.js 24, Python,
 FFmpeg ve EJS bileşenleriyle birlikte yt-dlp içerir; root olmayan kullanıcıyla çalışır.
 
+## Dışarıdan video indirme API'si
+
+Sunucuda `.env` içindeki `API_TOKEN` alanına uzun rastgele bir token yazın
+(üretmek için: `openssl rand -hex 32`). Token zorunludur; hız sınırı uygulanmaz.
+Arayüz de aynı token ile giriş ister. İstek gönderdiğiniz terminalde aynı token'ı
+`API_TOKEN` ortam değişkenine tanımlayın ve video bağlantısını gönderin:
+
+```bash
+curl --fail-with-body -X POST http://localhost:5055/api/v1/downloads \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://youtu.be/jNQXAC9IVRw"}'
+```
+
+Yanıttaki `statusUrl` ile ilerlemeyi sorgulayın; `completed` olduğunda `fileUrl`
+üzerinden dosyayı alın. Ses indirme, çözünürlük sınırı, format seçimi ve hata kodları:
+[API dokümantasyonu](docs/API.md). Başlatma, bekleme ve kaydetme işlemlerini yapan
+[Node.js örneği](examples/download.mjs) ek paket gerektirmez.
+
 ## Portainer ile kurulum
 
 Bu yapılandırma **Docker Standalone** ortamı içindir.
@@ -13,7 +32,7 @@ Bu yapılandırma **Docker Standalone** ortamı içindir.
 2. Portainer'da Docker ortamını açıp **Stacks → Add stack → Repository / Git repository** seçin.
 3. Repo adresini (`https://github.com/mre31/youtube-downloader`) ve değişikliklerin bulunduğu branch'i girin.
 4. **Compose path** alanına `compose.yml` yazın.
-5. İsteğe bağlı olarak **Environment variables** altında `APP_PORT` tanımlayın. Varsayılan: `5055`.
+5. **Environment variables** altında `API_TOKEN` tanımlayın (zorunlu). İsteğe bağlı `APP_PORT` varsayılanı: `5055`.
 6. **Deploy the stack** ile imajı derleyip uygulamayı başlatın.
 
 Uygulamaya `http://SUNUCU_IP:5055` üzerinden ulaşabilirsiniz. `APP_PORT` değiştirildiğinde
@@ -29,7 +48,7 @@ docker build -t youtube-downloader:local .
 ```
 
 Portainer'da **Stacks → Add stack → Web editor** alanına `portainer-stack.yml` içeriğini
-yapıştırın veya **Upload** ile dosyayı yükleyip dağıtın.
+yapıştırın veya **Upload** ile dosyayı yükleyin. `API_TOKEN` ortam değişkenini tanımlayıp dağıtın.
 
 İmajı başka makinede derliyorsanız bir container registry'ye gönderin ve Portainer'da
 `APP_IMAGE` değişkenini tam imaj adına ayarlayın (ör. `ghcr.io/kullanici/youtube-downloader:latest`).
@@ -41,6 +60,7 @@ Portainer'ın dağıtım yöntemleri: [resmî stack dokümanı](https://docs.por
 
 ```bash
 cp .env.example .env
+# .env dosyasında API_TOKEN alanını doldurun.
 docker compose up -d --build
 docker compose ps
 docker compose logs -f
@@ -83,6 +103,8 @@ Node.js 24 ve Python 3 kullanın:
 
 ```bash
 npm ci
+cp .env.example .env
+# .env dosyasında API_TOKEN alanını doldurun.
 npm run dev
 ```
 
@@ -105,6 +127,10 @@ Kontroller:
 
 ```bash
 npm test
+npm run test:integration
 npm run lint
 npm run build
 ```
+
+`test:integration`, üretim derlemesi üzerinde geçici bir sunucu ve sahte yt-dlp ile
+API akışını test eder; gerçek YouTube bağlantısı veya gerçek medya indirmesi yapmaz.

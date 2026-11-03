@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     ports:
       - "${APP_PORT:-5055}:5055"
+    environment:
+      API_TOKEN: ${API_TOKEN:-}
     volumes:
       - downloads:/app/temp
     logging:

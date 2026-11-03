@@ -112,6 +112,7 @@ export function buildVideoFormats(rawFormats: SourceFormat[]): VideoFormat[] {
       filesize: sizeOf(audio),
       vcodec: 'none',
       acodec: audio.acodec || 'none',
+      tbr: audio.abr || audio.tbr,
     });
   }
   return formats;
